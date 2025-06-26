@@ -13,14 +13,19 @@ import { getBodyString, getFetchRequestArgBody, SENTRY_XHR_DATA_KEY } from '@sen
 
 interface GraphQLClientOptions {
   endpoints: Array<string | RegExp>;
+  persisted?: {
+    idProperty?: string;
+    nameProperty?: string;
+  };
 }
 
 /** Standard graphql request shape: https://graphql.org/learn/serving-over-http/#post-request-and-body */
 interface GraphQLRequestPayload {
-  query: string;
+  query?: string;
   operationName?: string;
   variables?: Record<string, unknown>;
   extensions?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 interface GraphQLOperation {
@@ -65,10 +70,10 @@ function _updateSpanWithGraphQLData(client: Client, options: GraphQLClientOption
     const payload = getRequestPayloadXhrOrFetch(hint as XhrHint | FetchHint);
 
     if (isTracedGraphqlEndpoint && payload) {
-      const graphqlBody = getGraphQLRequestPayload(payload);
+      const graphqlBody = getGraphQLRequestPayload(payload, options);
 
       if (graphqlBody) {
-        const operationInfo = _getGraphQLOperation(graphqlBody);
+        const operationInfo = _getGraphQLOperation(graphqlBody, options);
         span.updateName(`${httpMethod} ${httpUrl} (${operationInfo})`);
         span.setAttribute('graphql.document', payload);
       }
@@ -95,7 +100,7 @@ function _updateBreadcrumbWithGraphQLData(client: Client, options: GraphQLClient
         const graphqlBody = getGraphQLRequestPayload(payload);
 
         if (!data.graphql && graphqlBody) {
-          const operationInfo = _getGraphQLOperation(graphqlBody);
+          const operationInfo = _getGraphQLOperation(graphqlBody, options);
           data['graphql.document'] = graphqlBody.query;
           data['graphql.operation'] = operationInfo;
         }
@@ -106,13 +111,15 @@ function _updateBreadcrumbWithGraphQLData(client: Client, options: GraphQLClient
 
 /**
  * @param requestBody - GraphQL request
- * @returns A formatted version of the request: 'TYPE NAME' or 'TYPE'
+ * @returns A formatted version of the request: 'TYPE NAME', 'TYPE' or 'NAME'
  */
-function _getGraphQLOperation(requestBody: GraphQLRequestPayload): string {
-  const { query: graphqlQuery, operationName: graphqlOperationName } = requestBody;
+function _getGraphQLOperation(requestBody: GraphQLRequestPayload, options?: GraphQLClientOptions): string {
+  const graphqlQuery = requestBody.query;
+  const graphqlOperationName = options?.persisted?.nameProperty ? requestBody[options.persisted.nameProperty] as string : requestBody.operationName;
 
-  const { operationName = graphqlOperationName, operationType } = parseGraphQLQuery(graphqlQuery);
-  const operationInfo = operationName ? `${operationType} ${operationName}` : `${operationType}`;
+  const { operationName = graphqlOperationName, operationType } = graphqlQuery ? parseGraphQLQuery(graphqlQuery) : {};
+
+  const operationInfo = operationName ? operationType ? `${operationType} ${operationName}` : operationName : operationType ?? '';
 
   return operationInfo;
 }
@@ -174,13 +181,13 @@ export function parseGraphQLQuery(query: string): GraphQLOperation {
  * @param payload - A valid JSON string
  * @returns A POJO or undefined
  */
-export function getGraphQLRequestPayload(payload: string): GraphQLRequestPayload | undefined {
+export function getGraphQLRequestPayload(payload: string, options?: GraphQLClientOptions): GraphQLRequestPayload | undefined {
   let graphqlBody = undefined;
   try {
     const requestBody = JSON.parse(payload) satisfies GraphQLRequestPayload;
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const isGraphQLRequest = !!requestBody['query'];
+    const isGraphQLRequest = !!requestBody['query'] || !!requestBody[options?.persisted?.idProperty || 'documentId'];
     if (isGraphQLRequest) {
       graphqlBody = requestBody;
     }
