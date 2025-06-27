@@ -21,11 +21,11 @@ interface GraphQLClientOptions {
 
 /** Standard graphql request shape: https://graphql.org/learn/serving-over-http/#post-request-and-body */
 interface GraphQLRequestPayload {
+  [key: string]: unknown;
   query?: string;
   operationName?: string;
   variables?: Record<string, unknown>;
   extensions?: Record<string, unknown>;
-  [key: string]: unknown;
 }
 
 interface GraphQLOperation {
@@ -97,7 +97,7 @@ function _updateBreadcrumbWithGraphQLData(client: Client, options: GraphQLClient
       const payload = getRequestPayloadXhrOrFetch(handlerData as XhrHint | FetchHint);
 
       if (isTracedGraphqlEndpoint && data && payload) {
-        const graphqlBody = getGraphQLRequestPayload(payload);
+        const graphqlBody = getGraphQLRequestPayload(payload, options);
 
         if (!data.graphql && graphqlBody) {
           const operationInfo = _getGraphQLOperation(graphqlBody, options);
@@ -117,7 +117,7 @@ function _getGraphQLOperation(requestBody: GraphQLRequestPayload, options?: Grap
   const graphqlQuery = requestBody.query;
   const graphqlOperationName = options?.persisted?.nameProperty ? requestBody[options.persisted.nameProperty] as string : requestBody.operationName;
 
-  const { operationName = graphqlOperationName, operationType } = graphqlQuery ? parseGraphQLQuery(graphqlQuery) : {};
+  const { operationName = graphqlOperationName, operationType = undefined } = graphqlQuery ? parseGraphQLQuery(graphqlQuery) : {};
 
   const operationInfo = operationName ? operationType ? `${operationType} ${operationName}` : operationName : operationType ?? '';
 
